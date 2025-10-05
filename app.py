@@ -8,6 +8,7 @@ from datetime import datetime, timedelta, timezone
 from flask import Flask, jsonify, request, abort
 from dotenv import load_dotenv
 import paho.mqtt.client as mqtt
+from sqlalchemy import desc
 
 from models import LeituraSensor, ImagemSensor
 from ext import db
@@ -68,6 +69,7 @@ def home():
         "mqtt": "HiveMQ Cloud",
         "endpoints": {
             "leituras": "/leituras?periodo=1d|7d|30d",
+            "ultima_leitura": "/leituras/ultima",
             "imagens": "/imagens?periodo=1d|7d|30d",
             "upload": "/api/upload",
             "status": "/api/status"
@@ -97,6 +99,30 @@ def listar_leituras():
         return jsonify([l.to_dict() for l in leituras])
     except Exception as e:
         return jsonify({"erro": f"Erro ao buscar leituras: {str(e)}"}), 500
+
+@app.route('/leituras/ultima', methods=['GET'])
+def ultima_leitura():
+    """Retorna apenas a última leitura dos sensores - ideal para apps móveis"""
+    try:
+        # Busca a leitura mais recente
+        ultima = LeituraSensor.query \
+            .order_by(desc(LeituraSensor.data_hora)) \
+            .first()
+        
+        if ultima:
+            return jsonify({
+                "mensagem": "Última leitura encontrada",
+                "dados": ultima.to_dict(),
+                "timestamp": datetime.now().isoformat()
+            })
+        else:
+            return jsonify({
+                "mensagem": "Nenhuma leitura encontrada",
+                "dados": None
+            }), 404
+            
+    except Exception as e:
+        return jsonify({"erro": f"Erro ao buscar última leitura: {str(e)}"}), 500
 
 @app.route('/imagens', methods=['GET'])
 def listar_imagens():
@@ -235,6 +261,16 @@ def status():
         except:
             bucket_status = "erro"
     
+    # Busca última leitura para mostrar no status
+    ultima_leitura = None
+    try:
+        with app.app_context():
+            ultima = LeituraSensor.query.order_by(desc(LeituraSensor.data_hora)).first()
+            if ultima:
+                ultima_leitura = ultima.data_hora.isoformat()
+    except:
+        ultima_leitura = "erro ao buscar"
+    
     return jsonify({
         "status": "online",
         "timestamp": datetime.now().isoformat(),
@@ -250,7 +286,8 @@ def status():
         },
         "dados": {
             "leituras_count": LeituraSensor.query.count(),
-            "imagens_count": ImagemSensor.query.count()
+            "imagens_count": ImagemSensor.query.count(),
+            "ultima_leitura": ultima_leitura
         },
         "ambiente": "production"
     })
@@ -367,6 +404,7 @@ if __name__ == '__main__':
     print("Endpoints disponíveis:")
     print(f"  GET  /                 -> Status da API")
     print(f"  GET  /leituras         -> Leituras dos sensores")
+    print(f"  GET  /leituras/ultima  -> Última leitura (para app)")
     print(f"  GET  /imagens          -> Lista de imagens")
     print(f"  POST /api/upload       -> Upload para Supabase")
     print(f"  GET  /api/status       -> Status do sistema")
