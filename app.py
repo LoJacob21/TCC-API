@@ -26,19 +26,43 @@ app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024
 db.init_app(app)
 
 # ===============================
-# Configuração Supabase
+# Configuração Supabase - CORRIGIDA
 # ===============================
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_KEY = os.getenv("SUPABASE_KEY")
 SUPABASE_BUCKET = os.getenv("SUPABASE_BUCKET", "imagens")
 
-# Inicializar cliente Supabase
-try:
-    supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
-    print(f"[Supabase] Conectado ao bucket: {SUPABASE_BUCKET}")
-except Exception as e:
-    print(f"[Supabase] Erro na conexão: {e}")
-    supabase = None
+# Variável global para o cliente Supabase
+supabase = None
+
+def init_supabase():
+    """Inicializa o cliente Supabase com tratamento de erro"""
+    global supabase
+    try:
+        print(f"[Supabase] Tentando conectar...")
+        print(f"[Supabase] URL: {SUPABASE_URL}")
+        print(f"[Supabase] Bucket: {SUPABASE_BUCKET}")
+        
+        supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
+        
+        # Testa a conexão listando buckets
+        print("[Supabase] Testando conexão...")
+        buckets = supabase.storage.list_buckets()
+        
+        bucket_names = [bucket.name for bucket in buckets]
+        print(f"[Supabase] Buckets disponíveis: {bucket_names}")
+        
+        if SUPABASE_BUCKET not in bucket_names:
+            print(f"[Supabase] AVISO: Bucket '{SUPABASE_BUCKET}' não encontrado!")
+            return False
+            
+        print(f"[Supabase] Conectado com sucesso ao bucket: {SUPABASE_BUCKET}")
+        return True
+        
+    except Exception as e:
+        print(f"[Supabase] ERRO na conexão: {str(e)}")
+        supabase = None
+        return False
 
 # ===============================
 # Configuração HiveMQ Cloud
@@ -63,9 +87,10 @@ socket.getaddrinfo = getaddrinfo_ipv4
 # ===============================
 @app.route('/')
 def home():
+    supabase_status = "conectado" if supabase else "erro"
     return jsonify({
         "mensagem": "API GreenVision funcionando!",
-        "storage": "Supabase",
+        "storage": f"Supabase ({supabase_status})",
         "mqtt": "HiveMQ Cloud",
         "endpoints": {
             "leituras": "/leituras?periodo=1d|7d|30d",
@@ -102,9 +127,8 @@ def listar_leituras():
 
 @app.route('/leituras/ultima', methods=['GET'])
 def ultima_leitura():
-    """Retorna apenas a última leitura dos sensores - ideal para apps móveis"""
+    """Retorna apenas a última leitura dos sensores"""
     try:
-        # Busca a leitura mais recente
         ultima = LeituraSensor.query \
             .order_by(desc(LeituraSensor.data_hora)) \
             .first()
@@ -153,8 +177,13 @@ def listar_imagens():
 @app.route('/api/upload', methods=['POST'])
 def upload_imagem():
     """Upload de imagens direto para o Supabase"""
+    global supabase
+    
+    # Tenta reconectar se supabase estiver None
     if supabase is None:
-        return jsonify({"erro": "Serviço de storage indisponível"}), 500
+        print("[Supabase] Cliente não inicializado, tentando reconectar...")
+        if not init_supabase():
+            return jsonify({"erro": "Serviço de storage indisponível. Falha na conexão com Supabase."}), 500
         
     try:
         image_data = None
@@ -164,7 +193,6 @@ def upload_imagem():
         
         # Verifica se é upload por form-data ou raw data
         if 'image' in request.files:
-            # Upload via form-data
             file = request.files['image']
             if file.filename == '':
                 return jsonify({"erro": "Nenhum arquivo selecionado"}), 400
@@ -177,12 +205,10 @@ def upload_imagem():
             print(f"[Upload] Recebido via form-data: {len(image_data)} bytes")
             
         elif request.data:
-            # Upload via raw data (binário direto da ESP32)
             image_data = request.data
             if len(image_data) == 0:
                 return jsonify({"erro": "Nenhum dado de imagem recebido"}), 400
             
-            # Verifica se é um JPEG válido
             if len(image_data) < 10 or image_data[0] != 0xFF or image_data[1] != 0xD8:
                 return jsonify({"erro": "Dados não correspondem a um JPEG válido"}), 400
             
@@ -195,25 +221,37 @@ def upload_imagem():
         print(f"[Supabase] Fazendo upload de {len(image_data)} bytes como {filename}")
         
         try:
+            # Método alternativo de upload
+            from io import BytesIO
+            file_like = BytesIO(image_data)
+            
             result = supabase.storage.from_(SUPABASE_BUCKET).upload(
-                path=filename,
                 file=image_data,
-                file_options={
-                    "content-type": "image/jpeg",
-                    "upsert": False
-                }
+                path=filename,
+                file_options={"content-type": "image/jpeg"}
             )
             
+            print(f"[Supabase] Resultado do upload: {result}")
+            
+            # Verifica se houve erro
             if hasattr(result, 'error') and result.error:
-                error_msg = result.error.message if hasattr(result.error, 'message') else str(result.error)
+                error_msg = getattr(result.error, 'message', str(result.error))
                 print(f"[Supabase] Erro no upload: {error_msg}")
                 return jsonify({"erro": f"Falha no upload para Supabase: {error_msg}"}), 500
                 
             print(f"[Supabase] Upload concluído com sucesso")
 
         except Exception as upload_error:
-            print(f"[Supabase] Exceção durante upload: {upload_error}")
-            return jsonify({"erro": f"Erro durante upload: {str(upload_error)}"}), 500
+            print(f"[Supabase] Exceção durante upload: {str(upload_error)}")
+            # Tenta método alternativo
+            try:
+                print("[Supabase] Tentando método alternativo de upload...")
+                # Upload simples
+                result = supabase.storage.from_(SUPABASE_BUCKET).upload(filename, image_data)
+                print(f"[Supabase] Upload alternativo: {result}")
+            except Exception as alt_error:
+                print(f"[Supabase] Erro no upload alternativo: {str(alt_error)}")
+                return jsonify({"erro": f"Erro durante upload: {str(alt_error)}"}), 500
 
         # Obtém URL pública da imagem
         try:
@@ -221,7 +259,9 @@ def upload_imagem():
             print(f"[Supabase] URL pública: {public_url}")
         except Exception as url_error:
             print(f"[Supabase] Erro ao obter URL pública: {url_error}")
-            return jsonify({"erro": f"Erro ao gerar URL pública: {str(url_error)}"}), 500
+            # Constrói URL manualmente se necessário
+            public_url = f"{SUPABASE_URL}/storage/v1/object/public/{SUPABASE_BUCKET}/{filename}"
+            print(f"[Supabase] URL manual: {public_url}")
 
         # Salva a URL no banco de dados
         try:
@@ -249,27 +289,29 @@ def upload_imagem():
 @app.route('/api/status', methods=['GET'])
 def status():
     """Endpoint de status da API"""
-    supabase_status = "conectado" if supabase else "erro"
+    global supabase
     
     # Testa conexão com Supabase
+    supabase_status = "conectado" if supabase else "erro"
     bucket_status = "indisponível"
+    
     if supabase:
         try:
             buckets = supabase.storage.list_buckets()
             bucket_names = [b.name for b in buckets]
             bucket_status = "ok" if SUPABASE_BUCKET in bucket_names else "bucket não encontrado"
-        except:
-            bucket_status = "erro"
+        except Exception as e:
+            bucket_status = f"erro: {str(e)}"
     
-    # Busca última leitura para mostrar no status
+    # Busca última leitura
     ultima_leitura = None
     try:
         with app.app_context():
             ultima = LeituraSensor.query.order_by(desc(LeituraSensor.data_hora)).first()
             if ultima:
                 ultima_leitura = ultima.data_hora.isoformat()
-    except:
-        ultima_leitura = "erro ao buscar"
+    except Exception as e:
+        ultima_leitura = f"erro: {str(e)}"
     
     return jsonify({
         "status": "online",
@@ -277,7 +319,8 @@ def status():
         "storage": {
             "supabase": supabase_status,
             "bucket": SUPABASE_BUCKET,
-            "status": bucket_status
+            "status": bucket_status,
+            "url": SUPABASE_URL
         },
         "mqtt": {
             "broker": MQTT_BROKER,
@@ -296,17 +339,12 @@ def status():
 # Configuração MQTT - HiveMQ Cloud
 # ===============================
 def setup_mqtt_client():
-    """Configura e retorna cliente MQTT para HiveMQ Cloud"""
     client = mqtt.Client(protocol=mqtt.MQTTv311)
-    
-    # Configurar TLS/SSL para HiveMQ Cloud
     client.tls_set(tls_version=ssl.PROTOCOL_TLS)
     client.username_pw_set(MQTT_USERNAME, MQTT_PASSWORD)
-    
     return client
 
 def on_connect(client, userdata, flags, rc):
-    """Callback quando conecta ao HiveMQ"""
     if rc == 0:
         print(f"[HiveMQ] Conectado com sucesso ao broker {MQTT_BROKER}:{MQTT_PORT}")
         client.subscribe(TOPICO_LEITURAS)
@@ -323,13 +361,11 @@ def on_connect(client, userdata, flags, rc):
         print(f"[HiveMQ] Falha na conexão: {error_msg}")
 
 def on_message(client, userdata, msg):
-    """Callback quando recebe mensagem MQTT da ESP32"""
     try:
         if msg.topic == TOPICO_LEITURAS:
             payload = json.loads(msg.payload.decode())
             print(f"[HiveMQ] Dados recebidos: {payload}")
             
-            # Salva no banco de dados
             with app.app_context():
                 leitura = LeituraSensor(
                     temperatura=payload.get("temperatura"),
@@ -342,26 +378,16 @@ def on_message(client, userdata, msg):
                 
             print("[HiveMQ] Leitura salva no banco de dados")
             
-    except json.JSONDecodeError as e:
-        print(f"[HiveMQ] Erro: Payload não é JSON válido: {msg.payload}")
     except Exception as e:
-        print(f"[HiveMQ] Erro ao processar mensagem: {str(e)}")
-
-def on_disconnect(client, userdata, rc):
-    """Callback quando desconecta do HiveMQ"""
-    if rc != 0:
-        print(f"[HiveMQ] Desconexão inesperada (código: {rc}). Tentando reconectar...")
+        print(f"[HiveMQ] Erro: {str(e)}")
 
 def mqtt_worker():
-    """Thread worker para MQTT - HiveMQ Cloud"""
     while True:
         try:
             client = setup_mqtt_client()
             client.on_connect = on_connect
             client.on_message = on_message
-            client.on_disconnect = on_disconnect
             
-            # Configurações de reconexão
             client.reconnect_delay_set(min_delay=1, max_delay=120)
             
             print(f"[HiveMQ] Conectando ao broker {MQTT_BROKER}:{MQTT_PORT}...")
@@ -369,47 +395,51 @@ def mqtt_worker():
             client.loop_forever()
             
         except Exception as e:
-            print(f"[HiveMQ] Erro fatal na conexão: {str(e)}")
-            print("[HiveMQ] Tentando reconectar em 10 segundos...")
+            print(f"[HiveMQ] Erro fatal: {str(e)}")
             threading.Event().wait(10)
 
 # ===============================
 # Inicialização
 # ===============================
 def create_tables():
-    """Cria as tabelas do banco de dados"""
     with app.app_context():
         db.create_all()
         print("[DB] Tabelas verificadas/criadas")
 
 def start_mqtt():
-    """Inicia a thread MQTT para HiveMQ"""
-    mqtt_thread = threading.Thread(target=mqtt_worker, daemon=True, name="HiveMQ-Thread")
+    mqtt_thread = threading.Thread(target=mqtt_worker, daemon=True)
     mqtt_thread.start()
     print("[HiveMQ] Thread MQTT iniciada")
 
 if __name__ == '__main__':
-    # Inicialização
+    # Inicializa Supabase primeiro
+    print("=" * 60)
+    print("Inicializando API GreenVision...")
+    print("=" * 60)
+    
     create_tables()
+    
+    print("[Supabase] Inicializando conexão...")
+    supabase_success = init_supabase()
+    
+    if not supabase_success:
+        print("[Supabase] AVISO: Conexão falhou. Upload de imagens não funcionará.")
+    else:
+        print("[Supabase] Conexão estabelecida com sucesso!")
+    
     start_mqtt()
     
     print("=" * 60)
     print("API GreenVision - HiveMQ + Supabase")
     print("=" * 60)
-    print("Configuração:")
-    print(f"  MQTT Broker: {MQTT_BROKER}:{MQTT_PORT}")
-    print(f"  MQTT Tópico: {TOPICO_LEITURAS}")
-    print(f"  Storage: Supabase ({SUPABASE_BUCKET})")
-    print("=" * 60)
     print("Endpoints disponíveis:")
     print(f"  GET  /                 -> Status da API")
     print(f"  GET  /leituras         -> Leituras dos sensores")
-    print(f"  GET  /leituras/ultima  -> Última leitura (para app)")
+    print(f"  GET  /leituras/ultima  -> Última leitura")
     print(f"  GET  /imagens          -> Lista de imagens")
     print(f"  POST /api/upload       -> Upload para Supabase")
     print(f"  GET  /api/status       -> Status do sistema")
     print("=" * 60)
 
-    # Inicia o servidor Flask
     port = int(os.environ.get('PORT', 5000))
     app.run(host='0.0.0.0', port=port, threaded=True)
