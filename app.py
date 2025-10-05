@@ -28,9 +28,10 @@ db.init_app(app)
 # ===============================
 # Configuração Supabase - CORRIGIDA
 # ===============================
-SUPABASE_URL = os.getenv("SUPABASE_URL")
+SUPABASE_URL = "https://" + os.getenv("SUPABASE_URL")  # ADICIONA https://
 SUPABASE_KEY = os.getenv("SUPABASE_KEY")
 SUPABASE_BUCKET = os.getenv("SUPABASE_BUCKET", "imagens")
+SUPABASE_DIRECTORY = os.getenv("SUPABASE_DIRECTORY", "fotos")
 
 # Variável global para o cliente Supabase
 supabase = None
@@ -42,6 +43,7 @@ def init_supabase():
         print(f"[Supabase] Tentando conectar...")
         print(f"[Supabase] URL: {SUPABASE_URL}")
         print(f"[Supabase] Bucket: {SUPABASE_BUCKET}")
+        print(f"[Supabase] Diretório: {SUPABASE_DIRECTORY}")
         
         supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
         
@@ -65,13 +67,13 @@ def init_supabase():
         return False
 
 # ===============================
-# Configuração HiveMQ Cloud
+# Configuração HiveMQ Cloud - CORRIGIDA
 # ===============================
-MQTT_BROKER = "758972e4960f458cad6ec8df523aea96.s1.eu.hivemq.cloud"
-MQTT_PORT = 8883
-MQTT_USERNAME = "GreenVision"
-MQTT_PASSWORD = "Green@9253"
-TOPICO_LEITURAS = "greenvision/leituras"
+MQTT_BROKER = os.getenv("MQTT_BROKER")
+MQTT_PORT = int(os.getenv("MQTT_PORT", 8883))
+MQTT_USERNAME = os.getenv("MQTT_USERNAME")
+MQTT_PASSWORD = os.getenv("MQTT_PASSWORD")
+TOPICO_LEITURAS = os.getenv("TOPICO_LEITURAS", "greenvision/leituras")
 
 # Forçar IPv4 para Render
 original_getaddrinfo = socket.getaddrinfo
@@ -83,7 +85,7 @@ def getaddrinfo_ipv4(*args, **kwargs):
 socket.getaddrinfo = getaddrinfo_ipv4
 
 # ===============================
-# Rotas Flask
+# Rotas Flask (MANTIDAS)
 # ===============================
 @app.route('/')
 def home():
@@ -176,7 +178,7 @@ def listar_imagens():
 
 @app.route('/api/upload', methods=['POST'])
 def upload_imagem():
-    """Upload de imagens direto para o Supabase"""
+    """Upload de imagens direto para o Supabase na pasta 'fotos'"""
     global supabase
     
     # Tenta reconectar se supabase estiver None
@@ -191,20 +193,8 @@ def upload_imagem():
         
         print(f"[Upload] Iniciando upload para Supabase...")
         
-        # Verifica se é upload por form-data ou raw data
-        if 'image' in request.files:
-            file = request.files['image']
-            if file.filename == '':
-                return jsonify({"erro": "Nenhum arquivo selecionado"}), 400
-            
-            if not file.filename.lower().endswith(('.jpg', '.jpeg')):
-                return jsonify({"erro": "Apenas arquivos JPG/JPEG são permitidos"}), 400
-            
-            image_data = file.read()
-            filename = f"esp32_{datetime.now().strftime('%Y%m%d_%H%M%S')}.jpg"
-            print(f"[Upload] Recebido via form-data: {len(image_data)} bytes")
-            
-        elif request.data:
+        # Verifica se é upload por raw data (da ESP32)
+        if request.data:
             image_data = request.data
             if len(image_data) == 0:
                 return jsonify({"erro": "Nenhum dado de imagem recebido"}), 400
@@ -212,19 +202,16 @@ def upload_imagem():
             if len(image_data) < 10 or image_data[0] != 0xFF or image_data[1] != 0xD8:
                 return jsonify({"erro": "Dados não correspondem a um JPEG válido"}), 400
             
-            filename = f"esp32_{datetime.now().strftime('%Y%m%d_%H%M%S')}.jpg"
+            # Nome do arquivo com timestamp e na pasta 'fotos'
+            filename = f"{SUPABASE_DIRECTORY}/esp32_{datetime.now().strftime('%Y%m%d_%H%M%S')}.jpg"
             print(f"[Upload] Recebido via raw data: {len(image_data)} bytes")
         else:
-            return jsonify({"erro": "Nenhuma imagem recebida. Use form-data com 'image' ou raw data"}), 400
+            return jsonify({"erro": "Nenhuma imagem recebida. Use raw data"}), 400
 
-        # Faz upload para o Supabase
+        # Faz upload para o Supabase na pasta 'fotos'
         print(f"[Supabase] Fazendo upload de {len(image_data)} bytes como {filename}")
         
         try:
-            # Método alternativo de upload
-            from io import BytesIO
-            file_like = BytesIO(image_data)
-            
             result = supabase.storage.from_(SUPABASE_BUCKET).upload(
                 file=image_data,
                 path=filename,
@@ -243,15 +230,7 @@ def upload_imagem():
 
         except Exception as upload_error:
             print(f"[Supabase] Exceção durante upload: {str(upload_error)}")
-            # Tenta método alternativo
-            try:
-                print("[Supabase] Tentando método alternativo de upload...")
-                # Upload simples
-                result = supabase.storage.from_(SUPABASE_BUCKET).upload(filename, image_data)
-                print(f"[Supabase] Upload alternativo: {result}")
-            except Exception as alt_error:
-                print(f"[Supabase] Erro no upload alternativo: {str(alt_error)}")
-                return jsonify({"erro": f"Erro durante upload: {str(alt_error)}"}), 500
+            return jsonify({"erro": f"Erro durante upload: {str(upload_error)}"}), 500
 
         # Obtém URL pública da imagem
         try:
@@ -259,7 +238,7 @@ def upload_imagem():
             print(f"[Supabase] URL pública: {public_url}")
         except Exception as url_error:
             print(f"[Supabase] Erro ao obter URL pública: {url_error}")
-            # Constrói URL manualmente se necessário
+            # Constrói URL manualmente
             public_url = f"{SUPABASE_URL}/storage/v1/object/public/{SUPABASE_BUCKET}/{filename}"
             print(f"[Supabase] URL manual: {public_url}")
 
@@ -319,6 +298,7 @@ def status():
         "storage": {
             "supabase": supabase_status,
             "bucket": SUPABASE_BUCKET,
+            "diretorio": SUPABASE_DIRECTORY,
             "status": bucket_status,
             "url": SUPABASE_URL
         },
@@ -431,6 +411,12 @@ if __name__ == '__main__':
     
     print("=" * 60)
     print("API GreenVision - HiveMQ + Supabase")
+    print("=" * 60)
+    print("Configuração:")
+    print(f"  Supabase: {SUPABASE_URL}")
+    print(f"  Bucket: {SUPABASE_BUCKET}")
+    print(f"  Diretório: {SUPABASE_DIRECTORY}")
+    print(f"  MQTT: {MQTT_BROKER}:{MQTT_PORT}")
     print("=" * 60)
     print("Endpoints disponíveis:")
     print(f"  GET  /                 -> Status da API")
