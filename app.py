@@ -391,30 +391,41 @@ def start_mqtt():
     mqtt_thread.start()
     print("[HiveMQ] Thread MQTT iniciada")
 
+def init_supabase_async():
+    """Inicializa Supabase de forma assíncrona para não bloquear o MQTT"""
+    global supabase
+    try:
+        print(f"[Supabase] Inicializando conexão...")
+        supabase_success = init_supabase()
+        
+        if not supabase_success:
+            print("[Supabase] AVISO: Conexão falhou. Upload de imagens não funcionará.")
+        else:
+            print("[Supabase] Conexão estabelecida com sucesso!")
+    except Exception as e:
+        print(f"[Supabase] Erro na inicialização: {e}")
+
 if __name__ == '__main__':
-    # Inicializa Supabase primeiro
     print("=" * 60)
     print("Inicializando API GreenVision...")
     print("=" * 60)
     
+    # 1. Primeiro cria as tabelas do banco
     create_tables()
     
-    print("[Supabase] Inicializando conexão...")
-    supabase_success = init_supabase()
-    
-    if not supabase_success:
-        print("[Supabase] AVISO: Conexão falhou. Upload de imagens não funcionará.")
-    else:
-        print("[Supabase] Conexão estabelecida com sucesso!")
-    
+    # 2. Inicia MQTT IMEDIATAMENTE (CRÍTICO)
     start_mqtt()
+    
+    # 3. Inicia Supabase em thread separada para não bloquear
+    supabase_thread = threading.Thread(target=init_supabase_async, daemon=True)
+    supabase_thread.start()
     
     print("=" * 60)
     print("API GreenVision - HiveMQ + Supabase")
     print("=" * 60)
     print("Configuração:")
     print(f"  Supabase: {SUPABASE_URL}")
-    print(f"  Bucket: {SUPABASE_BUCKET}")
+    print(f"  Bucket: {SUPABASE_BUCKET}") 
     print(f"  Diretório: {SUPABASE_DIRECTORY}")
     print(f"  MQTT: {MQTT_BROKER}:{MQTT_PORT}")
     print("=" * 60)
