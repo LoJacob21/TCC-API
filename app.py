@@ -141,7 +141,7 @@ def ultima_leitura():
         return jsonify({"erro": f"Erro ao buscar última leitura: {str(e)}"}), 500
 
 # Imagens
-app.route('/imagens', methods=['GET'])
+@app.route('/imagens', methods=['GET'])
 def listar_imagens():
     # Retorna as imagens do supabase com filtro de período
     periodo = request.args.get('periodo', default='1d')
@@ -170,10 +170,8 @@ def listar_imagens():
 # Rota de upload de imagens
 @app.route('/api/upload', methods=['POST'])
 def upload_imagem():
-    # Upload de imagens direto para o Supabase na pasta de fotos
     global supabase
     
-    # Reconexão caso o supabase estiver com valor None
     if supabase is None:
         print("Supabase - Cliente não inicializado, tentando reconectar...")
         if not init_supabase():
@@ -184,7 +182,6 @@ def upload_imagem():
         filename = None
         print("Upload - Iniciando upload para o Supabase...")
         
-        #Verifica se o upload é por raw data (direto da esp32)
         if request.data:
             image_data = request.data
             if len(image_data) == 0:
@@ -193,13 +190,12 @@ def upload_imagem():
             if len(image_data) < 10 or image_data[0] != 0xFF or image_data[1] != 0xD8:
                 return jsonify({"erro": "Dados não correspondem a um JPEG válido"}), 400
             
-            # Nome do arquivo com timestamp e na pasta 'fotos'
-            filename = f"{SUPABASE_DIRECTORY}/esp32_{datetime.now().strftime('%Y%m%d_%H%M%S')}.jpg" # Olhar aqui dps data/hora
+            filename = f"{SUPABASE_DIRECTORY}/esp32_{datetime.now().strftime('%Y%m%d_%H%M%S')}.jpg"
             print(f"Upload - Recebido via raw data: {len(image_data)} bytes")
         else:
             return jsonify({"erro": "Nenhuma imagem recebida. Use raw data"}), 400
         
-        # Faz upload para o Supabase na pasta 'fotos'
+        # Faz upload para o Supabase
         print(f"Supabase - Fazendo upload de {len(image_data)} bytes como {filename}")
         
         try:
@@ -211,7 +207,6 @@ def upload_imagem():
             
             print(f"Supabase - Resultado do upload: {result}")
             
-            # Verifica se houve erro
             if hasattr(result, 'error') and result.error:
                 error_msg = getattr(result.error, 'message', str(result.error))
                 print(f"Supabase - Erro no upload: {error_msg}")
@@ -223,35 +218,35 @@ def upload_imagem():
             print(f"Supabase - Exceção durante upload: {str(upload_error)}")
             return jsonify({"erro": f"Erro durante upload: {str(upload_error)}"}), 500
         
-            # Obtém URL pública da imagem
+        # Obtém URL pública da imagem
         try:
             public_url = supabase.storage.from_(SUPABASE_BUCKET).get_public_url(filename)
             print(f"Supabase - URL pública: {public_url}")
         except Exception as url_error:
             print(f"Supabase - Erro ao obter URL pública: {url_error}")
-            
-            #Constrói URL manualmente
             public_url = f"{SUPABASE_URL}/storage/v1/object/public/{SUPABASE_BUCKET}/{filename}"
             print(f"Supabase - URL manual: {public_url}")
-            
-            # Salva a url no bando de dados
-            try:
-                with app.app_context():
-                    imagem = ImagemSensor(arquivo=public_url, data_hora=datetime.now(timezone.utc))
-                    db.session.add(imagem)
-                    db.session.commit()
-                print(f"DB - URL salva no banco: {public_url}")
-            except Exception as db_error:
-                print(f"DB - Erro ao salvar no banco: {db_error}")
-                return jsonify({"erro": f"Erro ao salvar no banco: {str(db_error)}"}), 500
-            
-            return jsonify({
-                "mensagem": "Imagem foi salva no Supabase",
-                "filename": filename,
-                "url": public_url,
-                "tamanho": len(image_data),
-                "timestamp": datetime.now().isoformat()    # Verificar aqui tbm, data e hora foto
-            }), 200
+        
+        # ⭐⭐ CORREÇÃO: Este bloco deve estar DENTRO do try principal
+        # Salva a url no banco de dados
+        try:
+            with app.app_context():
+                imagem = ImagemSensor(arquivo=public_url, data_hora=datetime.now(timezone.utc))
+                db.session.add(imagem)
+                db.session.commit()
+            print(f"DB - URL salva no banco: {public_url}")
+        except Exception as db_error:
+            print(f"DB - Erro ao salvar no banco: {db_error}")
+            return jsonify({"erro": f"Erro ao salvar no banco: {str(db_error)}"}), 500
+        
+        # ⭐⭐ CORREÇÃO: Return deve estar aqui, não fora do try
+        return jsonify({
+            "mensagem": "Imagem foi salva no Supabase",
+            "filename": filename,
+            "url": public_url,
+            "tamanho": len(image_data),
+            "timestamp": datetime.now().isoformat()
+        }), 200
             
     except Exception as e:
         print(f"Upload - Erro geral: {str(e)}")
@@ -262,28 +257,37 @@ def upload_imagem():
 def status():
     global supabase
     
-    # Testa a conexão com supabase
-    supabase_status = "conectado" if supabase else "erro"
-    bucket_status = "indisponível"
-    
-    if supabase:
-        try:
-            buckets = supabase.storage.list_buckets()
-            bucket_names = [b.name for b in buckets]
-            bucket_status = "ok" if SUPABASE_BUCKET in bucket_names else "bucket não encontrado"
-        except Exception as e:
-            bucket_status = f"erro: {str(e)}"
-            
+    try:
+        # Testa a conexão com supabase
+        supabase_status = "conectado" if supabase else "erro"
+        bucket_status = "indisponível"
+        
+        if supabase:
+            try:
+                buckets = supabase.storage.list_buckets()
+                bucket_names = [b.name for b in buckets]
+                bucket_status = "ok" if SUPABASE_BUCKET in bucket_names else "bucket não encontrado"
+            except Exception as e:
+                bucket_status = f"erro: {str(e)}"
+        
         # Buscar a última leitura
         ultima_leitura = None
+        leituras_count = 0
+        imagens_count = 0
+        
         try:
             with app.app_context():
                 ultima = LeituraSensor.query.order_by(desc(LeituraSensor.data_hora)).first()
                 if ultima:
                     ultima_leitura = ultima.data_hora.isoformat()
+                
+                leituras_count = LeituraSensor.query.count()
+                imagens_count = ImagemSensor.query.count()
+                
         except Exception as e:
             ultima_leitura = f"erro: {str(e)}"
-            
+        
+        # ⭐⭐ CORREÇÃO: Return garantido com try/except
         return jsonify({
             "status": "online",
             "timestamp": datetime.now().isoformat(),
@@ -300,12 +304,20 @@ def status():
                 "topico": TOPICO_LEITURAS
             },
             "dados": {
-                "leituras_count": LeituraSensor.query.count(),
-                "imagens_count": ImagemSensor.query.count(),
+                "leituras_count": leituras_count,
+                "imagens_count": imagens_count,
                 "ultima_leitura": ultima_leitura
             },
             "ambiente": "production"
         })
+        
+    except Exception as e:
+        # ⭐⭐ CORREÇÃO: Fallback se tudo der errado
+        return jsonify({
+            "status": "error",
+            "erro": f"Erro ao gerar status: {str(e)}",
+            "timestamp": datetime.now().isoformat()
+        }), 500
 
 # CONFIG MQTT - HiveMQ Cloud
 #CONFIG DO CLIENTE
