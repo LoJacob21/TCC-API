@@ -19,7 +19,7 @@ uri = os.getenv("DATABASE_URI")
 app.config["SQLALCHEMY_DATABASE_URI"] = uri
 app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
 app.config["MAX_CONTENT_LENGHT"] = 16*1024*1024
-db.init(app)
+db.init_app(app)
 
 #CONFIG SUPABASE
 SUPABASE_URL = os.getenv("SUPABASE_URL")
@@ -92,7 +92,7 @@ def home():
     })
  
  # Leituras   
-@app.route('/leituras', method=['GET'])
+@app.route('/leituras', methods=['GET'])
 def listar_leituras():
     # Retorna as leituras dos sensores filtradas por período
     periodo = request.args.get("periodo", default="1d")
