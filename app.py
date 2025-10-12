@@ -18,7 +18,7 @@ app = Flask(__name__)
 uri = os.getenv("DATABASE_URI")
 app.config["SQLALCHEMY_DATABASE_URI"] = uri
 app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
-app.config["MAX_CONTENT_LENGHT"] = 16*1024*1024
+app.config["MAX_CONTENT_LENGTH"] = 16*1024*1024
 db.init_app(app)
 
 #CONFIG SUPABASE
@@ -85,8 +85,8 @@ def home():
         "endpoints": {
             "leituras": "/leituras?periodo=1d|7d|30d",
             "ultima_leitura": "/leituras/ultima",
-            "imagens": "/imagens?periodo=1d/7d/30d",
-            "upload": "api/upload",
+            "imagens": "/imagens?periodo=1d|7d|30d",
+            "upload": "/api/upload",
             "status": "/api/status"
         }
     })
@@ -109,7 +109,7 @@ def listar_leituras():
     
     try:
         leituras = LeituraSensor.query \
-            .filter(LeituraSensor.data_hora >+ limite) \
+            .filter(LeituraSensor.data_hora >= limite) \
             .order_by(LeituraSensor.data_hora.desc()) \
             .all()
         return jsonify([l.to_dict() for l in leituras])
@@ -237,7 +237,7 @@ def upload_imagem():
             # Salva a url no bando de dados
             try:
                 with app.app_context():
-                    imagem = ImagemSensor(arquivo=public_url, data_hora=datetime.now(timezone(timedelta(hours=-3))))
+                    imagem = ImagemSensor(arquivo=public_url, data_hora=datetime.now(timezone.utc))
                     db.session.add(imagem)
                     db.session.commit()
                 print(f"DB - URL salva no banco: {public_url}")
@@ -250,7 +250,7 @@ def upload_imagem():
                 "filename": filename,
                 "url": public_url,
                 "tamanho": len(image_data),
-                "timestamp": datetime.now.isoformat()    # Verificar aqui tbm, data e hora foto
+                "timestamp": datetime.now().isoformat()    # Verificar aqui tbm, data e hora foto
             }), 200
             
     except Exception as e:
@@ -290,7 +290,7 @@ def status():
             "storage": {
                 "supabase": supabase_status,
                 "bucket": SUPABASE_BUCKET,
-                "diretório": SUPABASE_DIRECTORY,
+                "diretorio": SUPABASE_DIRECTORY,
                 "status": bucket_status,
                 "url": SUPABASE_URL
             },
@@ -388,12 +388,12 @@ def init_supabase_async():
     global supabase
     try:
         print(f"Supabase - Inicializando conexão...")
-        supabase_sucess = init_supabase
+        supabase_sucess = init_supabase()
         
         if not supabase_sucess:
             print("Supabase - Conexão estabelecida com sucesso!")
     except Exception as e:
-        print("Supabase - Erro na inicialização: {e}")
+        print(f"Supabase - Erro na inicialização: {e}")
         
 if __name__ == '__main__':
     print("=" * 60)
