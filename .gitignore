@@ -1,0 +1,88 @@
+# ==============================
+# PYTHON / FLASK
+# ==============================
+__pycache__/
+*.py[cod]
+*.pyc
+*.pyo
+*.pyd
+
+# Virtual environments
+venv/
+env/
+.venv/
+ENV/
+env.bak/
+venv.bak/
+
+# Configurações locais
+instance/
+*.db
+*.sqlite3
+
+# ==============================
+# SUPABASE / CREDENCIAIS
+# ==============================
+.env
+.env.*
+supabase/.env
+
+# ==============================
+# RENDER (deploy e logs)
+# ==============================
+.render/
+.render-build/
+.render-cache/
+render.yaml
+*.render.log
+build.log
+logs/
+tmp/
+*.pid
+*.sock
+
+# ==============================
+# IDEs e editores
+# ==============================
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# ==============================
+# LOGS / TEMP / BACKUPS
+# ==============================
+*.log
+*.bak
+*.tmp
+*.temp
+*.old
+*.orig
+*.cache
+*.DS_Store
+*.coverage
+coverage/
+htmlcov/
+
+# ==============================
+# DEPLOY E BUILD
+# ==============================
+dist/
+build/
+*.egg-info/
+*.spec
+
+# ==============================
+# NODE / FRONTEND (caso tenha)
+# ==============================
+node_modules/
+package-lock.json
+
+# ==============================
+# TESTES
+# ==============================
+.pytest_cache/
+.tox/
+nosetests.xml
+coverage.xml
+test-results/
