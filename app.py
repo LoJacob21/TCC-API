@@ -411,33 +411,51 @@ def init_supabase_async():
     except Exception as e:
         print(f"Supabase - Erro na inicialização: {e}")  # ⭐ CORRIGIDO: f-string
         
-if __name__ == '__main__':
-    print("=" * 60)
-    print("Inicializando API...")
-    print("=" * 60)
-    
-    create_tables()
-    start_mqtt()
-    supabase_thread = threading.Thread(target=init_supabase_async, daemon=True)
-    supabase_thread.start()
-    
-    print("=" * 60)
-    print("Render + HiveMQ + Supabase")    
-    print("=" * 60)
-    print("Configuração:")
-    print(f"  Supabase: {SUPABASE_URL}")
-    print(f"  Bucket: {SUPABASE_BUCKET}")
-    print(f"  Diretório: {SUPABASE_DIRECTORY}")
-    print(f"  MQTT: {MQTT_BROKER}:{MQTT_PORT}")
-    print("=" * 60)
-    print("Endpoints disponíveis:")
-    print(f"  GET  /                -> Status da API")
-    print(f"  GET  /leituras        -> Leituras dos sensores")
-    print(f"  GET  /leituras/ultima -> Última leitura")
-    print(f"  GET  /imagens         -> Lista de imagens")
-    print(f"  POST /api/upload      -> Upload para Supabase")
-    print(f"  GET  /api/status      -> Status do sistema")
-    print("=" * 60)
+# ... todo o seu código anterior (rotas, funções MQTT, etc) ...
 
+# ⭐⭐ INICIALIZAÇÃO PARA RENDER (FORA DO if __name__)
+print("=" * 60)
+print("Inicializando API GreenVision...")
+print("=" * 60)
+
+# Cria tabelas do banco
+with app.app_context():
+    db.create_all()
+    print("✅ DB - Tabelas verificadas/criadas")
+
+# Inicia MQTT em thread separada
+print("🟡 Iniciando MQTT...")
+mqtt_thread = threading.Thread(target=mqtt_worker, daemon=True)
+mqtt_thread.start()
+print("✅ MQTT - Thread iniciada")
+
+# Inicia Supabase em thread separada  
+print("🟡 Iniciando Supabase...")
+supabase_thread = threading.Thread(target=init_supabase_async, daemon=True)
+supabase_thread.start()
+
+print("=" * 60)
+print("Render + HiveMQ + Supabase")    
+print("=" * 60)
+print("Configuração:")
+print(f"  Supabase: {SUPABASE_URL}")
+print(f"  Bucket: {SUPABASE_BUCKET}")
+print(f"  Diretório: {SUPABASE_DIRECTORY}")
+print(f"  MQTT: {MQTT_BROKER}:{MQTT_PORT}")
+print("=" * 60)
+print("Endpoints disponíveis:")
+print(f"  GET  /                -> Status da API")
+print(f"  GET  /leituras        -> Leituras dos sensores")
+print(f"  GET  /leituras/ultima -> Última leitura")
+print(f"  GET  /imagens         -> Lista de imagens")
+print(f"  POST /api/upload      -> Upload para Supabase")
+print(f"  GET  /api/status      -> Status do sistema")
+print("=" * 60)
+print("✅ API GreenVision - Inicialização concluída!")
+print("=" * 60)
+
+# ⭐⭐ MANTENHA APENAS O app.run() DENTRO DO if __name__
+if __name__ == '__main__':
+    print("🔧 Modo desenvolvimento local")
     port = int(os.environ.get('PORT', 5000))
-    app.run(host='0.0.0.0', port=port, threaded=True)
+    app.run(host='0.0.0.0', port=port, threaded=True, debug=True)
