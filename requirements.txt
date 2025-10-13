@@ -1,0 +1,8 @@
+flask
+python-dotenv
+Flask-SQLAlchemy
+psycopg2-binary
+paho-mqtt
+requests
+gunicorn
+supabase
