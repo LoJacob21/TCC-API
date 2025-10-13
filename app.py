@@ -232,7 +232,7 @@ def upload_imagem():
         # Salva a url no banco de dados
         try:
             with app.app_context():
-                imagem = ImagemSensor(arquivo=public_url, data_hora=datetime.now(timezone.utc))
+                imagem = ImagemSensor(arquivo=public_url, data_hora=datetime.now(timedelta(hours=-3)))
                 db.session.add(imagem)
                 db.session.commit()
             print(f"DB - URL salva no banco: {public_url}")
@@ -351,11 +351,15 @@ def on_message(client, userdata, msg):
             print(f"HiveMQ - Dados recebidos: {payload}")
             
             with app.app_context():
+                # ⭐⭐ CORREÇÃO: Usar horário de Brasília (UTC-3)
+                horario_brasilia = datetime.now(timezone(timedelta(hours=-3)))
+                
                 leitura = LeituraSensor(
                     temperatura=payload.get("temperatura"),
                     umidade_ar=payload.get("umidade_ar"),
                     umidade_solo=payload.get("umidade_solo"),
-                    luminosidade=payload.get("luminosidade")
+                    luminosidade=payload.get("luminosidade"),
+                    data_hora=horario_brasilia  # ⭐⭐ Horário correto!
                 )
                 db.session.add(leitura)
                 db.session.commit()
