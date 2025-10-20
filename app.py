@@ -380,10 +380,6 @@ def mqtt_worker():
             time.sleep(10)  
             
 # INICIALIZAÇÃO
-def create_tables():
-    with app.app_context():
-        db.create_all()
-        print("DB - Tabelas verificadas/criadas")
 
 def start_mqtt():
     print("INICIANDO MQTT...")
@@ -408,14 +404,6 @@ def init_supabase_async():
 print("=" * 60)
 print("Inicializando API GreenVision...")
 print("=" * 60)
-
-# Cria tabelas do banco
-try:
-    with app.app_context():
-        db.create_all()
-        print("DB - Tabelas verificadas/criadas")
-except Exception as e:
-    print(f" DB - Erro ao criar tabelas: {e}")
 
 # Inicia MQTT em thread separada
 try:
