@@ -17,9 +17,17 @@ from ext import db
 load_dotenv()
 app = Flask(__name__)
 uri = os.getenv("DATABASE_URI")
+if uri and uri.startswith("postgresql://"):
+    uri = uri.replace("postgresql://", "postgresql+psycopg://", 1)
+    
 app.config["SQLALCHEMY_DATABASE_URI"] = uri
 app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
 app.config["MAX_CONTENT_LENGTH"] = 16*1024*1024
+app.config["SQLALCHEMY_ENGINE_OPTIONS"] = {
+    "pool_recycle": 300,
+    "pool_pre_ping": True
+}
+
 db.init_app(app)
 
 # CONFIG SUPABASE
