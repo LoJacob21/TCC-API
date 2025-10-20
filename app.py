@@ -19,7 +19,7 @@ app = Flask(__name__)
 uri = os.getenv("DATABASE_URI")
 app.config["SQLALCHEMY_DATABASE_URI"] = uri
 app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
-app.config["MAX_CONTENT_LENGTH"] = 16 * 1024 * 1024  # ⭐ CORRIGIDO: "LENGTH" não "LENGHT"
+app.config["MAX_CONTENT_LENGTH"] = 16*1024*1024
 db.init_app(app)
 
 # CONFIG SUPABASE
@@ -28,44 +28,41 @@ SUPABASE_KEY = os.getenv("SUPABASE_KEY")
 SUPABASE_BUCKET = os.getenv("SUPABASE_BUCKET", "imagens")
 SUPABASE_DIRECTORY = os.getenv("SUPABASE_DIRECTORY", "fotos")
 supabase = None
+supabase_initialized = False
 
 def init_supabase():
-    global supabase
+    global supabase, supabase_initialized
     try:
-        print("Supabase - Tentando conectar...")
+        print("Supabase - Iniciando conexão...")
         print(f"Supabase - URL: {SUPABASE_URL}")
-        print(f"Supabase - Key: {SUPABASE_KEY[:10]}")
-        print(f"Supabase - Bucket: {SUPABASE_BUCKET}")
-        print(f"Supabase - Diretório: {SUPABASE_DIRECTORY}")
+        print(f"Supabase - Key: {SUPABASE_KEY[:10]}...")
         
+        # Configuração mais robusta
         supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
         
-        # Testa a conexão listando os buckets disponíveis
-        print("Supabase - Testando a conexão...")
-        buckets = supabase.storage.list_buckets()
-        bucket_names = [bucket.name for bucket in buckets]
-        print(f"Supabase - Buckets disponíveis: {bucket_names}") 
-
-        if SUPABASE_BUCKET not in bucket_names:
-            print(f"Supabase - Aviso: Bucket '{SUPABASE_BUCKET}' não encontrado!")
-            return False
+        # Teste simples de conexão
+        print("Supabase - Testando conexão...")
+        response = supabase.table('_nonexistent_table').select('*').limit(1).execute()
         
-        print(f"Supabase - Conectado com sucesso ao bucket: {SUPABASE_BUCKET}")
+        # Se chegou aqui, a conexão funciona
+        print("Supabase - Conexão estabelecida com sucesso!")
+        supabase_initialized = True
         return True
-
+        
     except Exception as e:
         print(f"Supabase - Erro na conexão: {str(e)}")
         supabase = None
+        supabase_initialized = False
         return False
 
-# CONFIG HiveMQ Cloud
+# CONFIG HIVEMQ - CORRIGIDO
 MQTT_BROKER = os.getenv("MQTT_BROKER")
 MQTT_PORT = int(os.getenv("MQTT_PORT", 8883))
 MQTT_USERNAME = os.getenv("MQTT_USERNAME")
 MQTT_PASSWORD = os.getenv("MQTT_PASSWORD")
 TOPICO_LEITURAS = os.getenv("TOPICO_LEITURAS", "greenvision/leituras")
 
-# Forçar o IPv4 para o Render
+# Forçar IPv4
 original_getaddrinfo = socket.getaddrinfo
 def getaddrinfo_ipv4(*args, **kwargs):
     responses = original_getaddrinfo(*args, **kwargs)
@@ -86,8 +83,8 @@ def home():
         "endpoints": {
             "leituras": "/leituras?periodo=1d|7d|30d",
             "ultima_leitura": "/leituras/ultima",
-            "imagens": "/imagens?periodo=1d|7d|30d",  # ⭐ CORRIGIDO: | em vez de /
-            "upload": "/api/upload",  # ⭐ CORRIGIDO: adicionado / no início
+            "imagens": "/imagens?periodo=1d|7d|30d",
+            "upload": "/api/upload", 
             "status": "/api/status"
         }
     })
@@ -128,9 +125,7 @@ def ultima_leitura():
         
         if ultima:
             return jsonify({
-                "mensagem": "Última leitura encontrada",
                 "dados": ultima.to_dict(),
-                "timestamp": datetime.now().isoformat()
             })
         else:
             return jsonify({
@@ -142,7 +137,7 @@ def ultima_leitura():
         return jsonify({"erro": f"Erro ao buscar última leitura: {str(e)}"}), 500
 
 # Imagens
-@app.route('/imagens', methods=['GET'])  # ⭐ CORRIGIDO: faltava @
+@app.route('/imagens', methods=['GET'])
 def listar_imagens():
     # Retorna as imagens do supabase com filtro de período
     periodo = request.args.get('periodo', default='1d')
@@ -169,89 +164,78 @@ def listar_imagens():
         return jsonify({"erro": f"Erro ao buscar imagens: {str(e)}"}), 500
 
 # Rota de upload de imagens
+# ROTA DE UPLOAD CORRIGIDA
 @app.route('/api/upload', methods=['POST'])
 def upload_imagem():
-    global supabase
+    global supabase, supabase_initialized
     
-    if supabase is None:
+    if not supabase_initialized or supabase is None:
         print("Supabase - Cliente não inicializado, tentando reconectar...")
         if not init_supabase():
             return jsonify({"erro": "Storage indisponível. Falha na conexão com Supabase"}), 500
     
     try:
-        image_data = None
-        filename = None
-        print("Upload - Iniciando upload para o Supabase...")
+        # Verifica se há dados
+        if not request.data or len(request.data) == 0:
+            return jsonify({"erro": "Nenhum dado de imagem recebido"}), 400
         
-        if request.data:
-            image_data = request.data
-            if len(image_data) == 0:
-                return jsonify({"erro": "Nenhum dado de imagem recebido"}), 400
-            
-            if len(image_data) < 10 or image_data[0] != 0xFF or image_data[1] != 0xD8:
-                return jsonify({"erro": "Dados não correspondem a um JPEG válido"}), 400
-            
-            filename = f"{SUPABASE_DIRECTORY}/esp32_{datetime.now().strftime('%Y%m%d_%H%M%S')}.jpg"
-            print(f"Upload - Recebido via raw data: {len(image_data)} bytes")
-        else:
-            return jsonify({"erro": "Nenhuma imagem recebida. Use raw data"}), 400
+        image_data = request.data
         
-        # Faz upload para o Supabase
-        print(f"Supabase - Fazendo upload de {len(image_data)} bytes como {filename}")
+        # Verificação básica de JPEG
+        if len(image_data) < 10 or image_data[0:2] != b'\xff\xd8':
+            return jsonify({"erro": "Dados não correspondem a um JPEG válido"}), 400
         
+        # Nome do arquivo
+        filename = f"{SUPABASE_DIRECTORY}/esp32_{datetime.now().strftime('%Y%m%d_%H%M%S')}.jpg"
+        print(f"Upload - Recebidos {len(image_data)} bytes, salvando como {filename}")
+        
+        # Upload para Supabase
         try:
             result = supabase.storage.from_(SUPABASE_BUCKET).upload(
                 file=image_data,
                 path=filename,
                 file_options={"content-type": "image/jpeg"}
-            )    
+            )
             
-            print(f"Supabase - Resultado do upload: {result}")
+            print(f"Supabase - Upload realizado")
             
-            if hasattr(result, 'error') and result.error:
-                error_msg = getattr(result.error, 'message', str(result.error))
-                print(f"Supabase - Erro no upload: {error_msg}")
-                return jsonify({"erro": f"Falha no upload para o Supabase: {error_msg}"}), 500
-            
-            print(f"Supabase - Upload concluído com sucesso")
-        
         except Exception as upload_error:
-            print(f"Supabase - Exceção durante upload: {str(upload_error)}")
-            return jsonify({"erro": f"Erro durante upload: {str(upload_error)}"}), 500
+            print(f"Supabase - Erro no upload: {str(upload_error)}")
+            return jsonify({"erro": f"Falha no upload: {str(upload_error)}"}), 500
         
-        # Obtém URL pública da imagem
+        # Obtém URL pública
         try:
             public_url = supabase.storage.from_(SUPABASE_BUCKET).get_public_url(filename)
             print(f"Supabase - URL pública: {public_url}")
         except Exception as url_error:
-            print(f"Supabase - Erro ao obter URL pública: {url_error}")
+            print(f"Supabase - Erro ao obter URL: {url_error}")
             public_url = f"{SUPABASE_URL}/storage/v1/object/public/{SUPABASE_BUCKET}/{filename}"
-            print(f"Supabase - URL manual: {public_url}")
         
-        # ⭐⭐ CORREÇÃO: Este bloco deve estar DENTRO do try principal
-        # Salva a url no banco de dados
+        # Salva no banco de dados
         try:
             with app.app_context():
-                imagem = ImagemSensor(arquivo=public_url, data_hora=datetime.now(timedelta(hours=-3)))
+                imagem = ImagemSensor(
+                    arquivo=public_url, 
+                    data_hora=datetime.now(timezone.utc)
+                )
                 db.session.add(imagem)
                 db.session.commit()
-            print(f"DB - URL salva no banco: {public_url}")
+            print("DB - Imagem salva no banco com sucesso")
         except Exception as db_error:
             print(f"DB - Erro ao salvar no banco: {db_error}")
-            return jsonify({"erro": f"Erro ao salvar no banco: {str(db_error)}"}), 500
+            # Não falha o upload por erro no banco
         
-        # ⭐⭐ CORREÇÃO: Return deve estar aqui, não fora do try
         return jsonify({
-            "mensagem": "Imagem foi salva no Supabase",
+            "mensagem": "Imagem salva com sucesso",
             "filename": filename,
             "url": public_url,
             "tamanho": len(image_data),
             "timestamp": datetime.now().isoformat()
         }), 200
-            
+        
     except Exception as e:
         print(f"Upload - Erro geral: {str(e)}")
-        return jsonify({"erro": f"Erro interno no servidor: {str(e)}"}), 500
+        return jsonify({"erro": f"Erro interno: {str(e)}"}), 500
     
 # Rota do status da api       
 @app.route('/api/status', methods=['GET'])
@@ -288,7 +272,6 @@ def status():
         except Exception as e:
             ultima_leitura = f"erro: {str(e)}"
         
-        # ⭐⭐ CORREÇÃO: Return garantido com try/except
         return jsonify({
             "status": "online",
             "timestamp": datetime.now().isoformat(),
@@ -313,7 +296,6 @@ def status():
         })
         
     except Exception as e:
-        # ⭐⭐ CORREÇÃO: Fallback se tudo der errado
         return jsonify({
             "status": "error",
             "erro": f"Erro ao gerar status: {str(e)}",
@@ -351,15 +333,13 @@ def on_message(client, userdata, msg):
             print(f"HiveMQ - Dados recebidos: {payload}")
             
             with app.app_context():
-                # ⭐⭐ CORREÇÃO: Usar horário de Brasília (UTC-3)
-                horario_brasilia = datetime.now(timezone(timedelta(hours=-3)))
                 
                 leitura = LeituraSensor(
                     temperatura=payload.get("temperatura"),
                     umidade_ar=payload.get("umidade_ar"),
                     umidade_solo=payload.get("umidade_solo"),
                     luminosidade=payload.get("luminosidade"),
-                    data_hora=horario_brasilia  # ⭐⭐ Horário correto!
+                    data_hora=datetime.now(timezone.utc)
                 )
                 db.session.add(leitura)
                 db.session.commit()
@@ -370,24 +350,24 @@ def on_message(client, userdata, msg):
         print(f"HiveMQ - Erro: {str(e)}")
 
 def mqtt_worker():
-    print("🟡 MQTT - Worker iniciado!")  # ⭐ LOG DE DEBUG
+    print("MQTT - Worker iniciado!")  
     
     while True:
         try:
-            print("🟡 MQTT - Tentando conectar...")  # ⭐ LOG DE DEBUG
+            print("MQTT - Tentando conectar...")  
             client = setup_mqtt_client()
             client.on_connect = on_connect
             client.on_message = on_message
             
-            print(f"🟡 MQTT - Conectando ao broker {MQTT_BROKER}:{MQTT_PORT}...")
+            print(f"MQTT - Conectando ao broker {MQTT_BROKER}:{MQTT_PORT}...")
             client.connect(MQTT_BROKER, MQTT_PORT, 60)
-            print("🟡 MQTT - Conexão estabelecida, iniciando loop...")  # ⭐ LOG DE DEBUG
+            print("MQTT - Conexão estabelecida, iniciando loop...")  
             client.loop_forever()
             
         except Exception as e:
-            print(f"❌ MQTT - Erro fatal: {str(e)}")
-            print("🟡 MQTT - Aguardando 10 segundos antes de reconectar...")  # ⭐ LOG DE DEBUG
-            time.sleep(10)  # ⭐ USE time.sleep() EM VEZ DE threading.Event()
+            print(f"MQTT - Erro fatal: {str(e)}")
+            print("MQTT - Aguardando 10 segundos antes de reconectar...")  
+            time.sleep(10)  
             
 # INICIALIZAÇÃO
 def create_tables():
@@ -396,69 +376,58 @@ def create_tables():
         print("DB - Tabelas verificadas/criadas")
 
 def start_mqtt():
-    print("🟡 INICIANDO MQTT...")  # ⭐ LOG DE DEBUG
+    print("INICIANDO MQTT...")
     mqtt_thread = threading.Thread(target=mqtt_worker, daemon=True)
     mqtt_thread.start()
-    print("✅ MQTT - Thread MQTT iniciada")
-    print(f"✅ MQTT - Thread ativa: {mqtt_thread.is_alive()}")  # ⭐ VERIFICA SE ESTÁ VIVA
+    print("MQTT - Thread MQTT iniciada")
+    print(f"MQTT - Thread ativa: {mqtt_thread.is_alive()}")
     
 def init_supabase_async():
     global supabase
     try:
         print(f"Supabase - Inicializando conexão...")
-        supabase_success = init_supabase()  # ⭐ CORRIGIDO: faltavam ()
+        supabase_success = init_supabase()
         
         if not supabase_success:
             print("Supabase - Aviso: Conexão falhou. Upload de imagens não funcionará.")
         else:
             print("Supabase - Conexão estabelecida com sucesso!")
     except Exception as e:
-        print(f"Supabase - Erro na inicialização: {e}")  # ⭐ CORRIGIDO: f-string
+        print(f"Supabase - Erro na inicialização: {e}")
         
-# ... todo o seu código anterior (rotas, funções MQTT, etc) ...
-
-# ⭐⭐ INICIALIZAÇÃO PARA RENDER (FORA DO if __name__)
 print("=" * 60)
 print("Inicializando API GreenVision...")
 print("=" * 60)
 
 # Cria tabelas do banco
-with app.app_context():
-    db.create_all()
-    print("✅ DB - Tabelas verificadas/criadas")
+try:
+    with app.app_context():
+        db.create_all()
+        print("DB - Tabelas verificadas/criadas")
+except Exception as e:
+    print(f" DB - Erro ao criar tabelas: {e}")
 
 # Inicia MQTT em thread separada
-print("🟡 Iniciando MQTT...")
-mqtt_thread = threading.Thread(target=mqtt_worker, daemon=True)
-mqtt_thread.start()
-print("✅ MQTT - Thread iniciada")
+try:
+    print("Iniciando MQTT...")
+    mqtt_thread = threading.Thread(target=mqtt_worker, daemon=True)
+    mqtt_thread.start()
+    print("MQTT - Thread iniciada")
+except Exception as e:
+    print(f"MQTT - Erro ao iniciar: {e}")
 
 # Inicia Supabase em thread separada  
-print("🟡 Iniciando Supabase...")
-supabase_thread = threading.Thread(target=init_supabase_async, daemon=True)
-supabase_thread.start()
+try:
+    print("Iniciando Supabase...")
+    supabase_thread = threading.Thread(target=init_supabase_async, daemon=True)
+    supabase_thread.start()
+except Exception as e:
+    print(f"Supabase - Erro ao iniciar: {e}")
 
 print("=" * 60)
 print("Render + HiveMQ + Supabase")    
 print("=" * 60)
-print("Configuração:")
-print(f"  Supabase: {SUPABASE_URL}")
-print(f"  Bucket: {SUPABASE_BUCKET}")
-print(f"  Diretório: {SUPABASE_DIRECTORY}")
-print(f"  MQTT: {MQTT_BROKER}:{MQTT_PORT}")
-print("=" * 60)
-print("Endpoints disponíveis:")
-print(f"  GET  /                -> Status da API")
-print(f"  GET  /leituras        -> Leituras dos sensores")
-print(f"  GET  /leituras/ultima -> Última leitura")
-print(f"  GET  /imagens         -> Lista de imagens")
-print(f"  POST /api/upload      -> Upload para Supabase")
-print(f"  GET  /api/status      -> Status do sistema")
-print("=" * 60)
-print("✅ API GreenVision - Inicialização concluída!")
-print("=" * 60)
 
-# ⭐⭐ MANTENHA APENAS O app.run() DENTRO DO if __name__
 if __name__ == '__main__':
     print("🔧 Modo desenvolvimento local")
     port = int(os.environ.get('PORT', 5000))
