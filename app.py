@@ -14,7 +14,6 @@ from dotenv import load_dotenv
 from sqlalchemy import desc
 from ext import db
 
-
 # CONFIG FLASK E BANCO
 load_dotenv()
 app = Flask(__name__)
