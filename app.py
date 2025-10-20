@@ -4,22 +4,43 @@ import threading
 import socket
 import ssl
 import time
+import sqlalchemy as sa
 import paho.mqtt.client as mqtt
 from datetime import datetime, timedelta, timezone
 from flask import Flask, jsonify, request, abort
 from models import LeituraSensor, ImagemSensor
 from supabase import create_client, Client
+from sqlalchemy.dialects import registry
 from dotenv import load_dotenv
 from sqlalchemy import desc
 from ext import db
 
+try:
+    registry.register("postgresql.psycopg", "psycopg", "sqlalchemy.dialects.postgresql.psycopg")
+    print("PSYCOPG3 registrado com sucesso")
+except Exception as e:
+    print("Erro ao registrar psycopg3: {}")
+    
 # CONFIG FLASK E BANCO
 load_dotenv()
 app = Flask(__name__)
+
 uri = os.getenv("DATABASE_URI")
+if uri and uri.startswith("postgresql://"):
+    uri = uri.replace("postgresql://", "postgresql+psycopg://", 1)
+    print(f"✅ URL modificada para psycopg3: {uri}")
+    
 app.config["SQLALCHEMY_DATABASE_URI"] = uri
 app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
 app.config["MAX_CONTENT_LENGTH"] = 16*1024*1024
+app.config["SQLALCHEMY_ENGINE_OPTIONS"] = {
+    "pool_recycle": 300,
+    "pool_pre_ping": True,
+    "connect_args": {
+        "sslmode": "require"
+    }
+}
+
 db.init_app(app)
 
 # CONFIG SUPABASE
