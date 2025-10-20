@@ -41,17 +41,26 @@ def init_supabase():
         # Configuração mais robusta
         supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
         
-        # Teste simples de conexão
         print("Supabase - Testando conexão...")
-        response = supabase.table('_nonexistent_table').select('*').limit(1).execute()
+        
+        # Testa listando os buckets (método que sempre funciona)
+        buckets = supabase.storage.list_buckets()
+        print(f"Supabase - Buckets disponíveis: {len(buckets)}")
+        
+        # Verifica se nosso bucket existe
+        bucket_names = [bucket.name for bucket in buckets]
+        if SUPABASE_BUCKET in bucket_names:
+            print(f"Supabase - Bucket '{SUPABASE_BUCKET}' encontrado!")
+        else:
+            print(f"Supabase - Bucket '{SUPABASE_BUCKET}' não encontrado")
         
         # Se chegou aqui, a conexão funciona
-        print("Supabase - Conexão estabelecida com sucesso!")
+        print("✅ Supabase - Conexão estabelecida com sucesso!")
         supabase_initialized = True
         return True
         
     except Exception as e:
-        print(f"Supabase - Erro na conexão: {str(e)}")
+        print(f"Supabase - Erro real na conexão: {str(e)}")
         supabase = None
         supabase_initialized = False
         return False
