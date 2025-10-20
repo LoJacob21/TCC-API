@@ -312,6 +312,29 @@ def status():
             "timestamp": datetime.now().isoformat()
         }), 500
 
+@app.route('/ping', methods=['GET'])
+def ping():
+    try:
+        status_geral = "online"
+        
+        try:
+            with app.app_context():
+                leituras_count = LeituraSensor.query.limit(1).count()
+        except Exception as e:
+            status_geral = "warning_db"
+        
+        return jsonify({
+            "status": status_geral,
+            "timestamp": datetime.now().isoformat(),
+            "message": "API - Health Check OK"
+        }), 200
+    
+    except Exception as e:
+        return jsonify({
+            "status": "error",
+            "timestamp": datetime.now().isoformat()
+        }), 500
+
 # CONFIG MQTT - HiveMQ Cloud
 def setup_mqtt_client():
     client = mqtt.Client(protocol=mqtt.MQTTv311)
