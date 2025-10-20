@@ -11,6 +11,8 @@ from flask import Flask, jsonify, request, abort
 from models import LeituraSensor, ImagemSensor
 from supabase import create_client, Client
 from sqlalchemy.dialects import registry
+from sqlalchemy.orm import sessionmaker
+from sqlalchemy import create_engine
 from dotenv import load_dotenv
 from sqlalchemy import desc
 from ext import db
@@ -28,7 +30,10 @@ app = Flask(__name__)
 uri = os.getenv("DATABASE_URI")
 if uri and uri.startswith("postgresql://"):
     uri = uri.replace("postgresql://", "postgresql+psycopg://", 1)
-    print(f"✅ URL modificada para psycopg3: {uri}")
+    print(f"URL modificada para psycopg3: {uri}")
+    
+engine = create_engine(uri)
+Session = sessionmaker(bind=engine)
     
 app.config["SQLALCHEMY_DATABASE_URI"] = uri
 app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
@@ -36,9 +41,6 @@ app.config["MAX_CONTENT_LENGTH"] = 16*1024*1024
 app.config["SQLALCHEMY_ENGINE_OPTIONS"] = {
     "pool_recycle": 300,
     "pool_pre_ping": True,
-    "connect_args": {
-        "sslmode": "require"
-    }
 }
 
 db.init_app(app)
