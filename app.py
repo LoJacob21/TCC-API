@@ -21,6 +21,20 @@ uri = os.getenv("DATABASE_URI")
 app.config["SQLALCHEMY_DATABASE_URI"] = uri
 app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
 app.config["MAX_CONTENT_LENGTH"] = 16*1024*1024
+app.config["SQLALCHEMY_ENGINE_OPTIONS"] = {
+    "pool_recycle": 180,           # Fecha conexões a cada 3min (era 300)
+    "pool_pre_ping": True,         # Testa conexão antes de usar
+    "pool_timeout": 10,            # Timeout menor (era 30)
+    "max_overflow": 15,            # Mais conexões extras sob carga
+    "pool_size": 8,                # Mais conexões mantidas
+    "connect_args": {
+        "connect_timeout": 10,
+        "keepalives": 1,
+        "keepalives_idle": 30,
+        "keepalives_interval": 10,
+        "keepalives_count": 5
+    }
+}
 db.init_app(app)
 
 # CONFIG SUPABASE
@@ -365,22 +379,54 @@ def on_message(client, userdata, msg):
             payload = json.loads(msg.payload.decode())
             print(f"HiveMQ - Dados recebidos: {payload}")
             
-            with app.app_context():
-                
-                leitura = LeituraSensor(
-                    temperatura=payload.get("temperatura"),
-                    umidade_ar=payload.get("umidade_ar"),
-                    umidade_solo=payload.get("umidade_solo"),
-                    luminosidade=payload.get("luminosidade"),
-                    data_hora=datetime.now(timezone.utc)
-                )
-                db.session.add(leitura)
-                db.session.commit()
-                
-            print("HiveMQ - Leitura salva no banco de dados")
-        
+            #SISTEMA DE RETRY ROBUSTO
+            tentativas = 0
+            max_tentativas = 3
+            
+            while tentativas < max_tentativas:
+                try:
+                    with app.app_context():
+                        leitura = LeituraSensor(
+                            temperatura=payload.get("temperatura"),
+                            umidade_ar=payload.get("umidade_ar"),
+                            umidade_solo=payload.get("umidade_solo"),
+                            luminosidade=payload.get("luminosidade"),
+                            data_hora=datetime.now(timezone.utc)
+                        )
+                        db.session.add(leitura)
+                        db.session.commit()
+                    
+                    print(f"HiveMQ - Leitura salva (tentativa {tentativas + 1})")
+                    break  # Sucesso - sai do loop
+                    
+                except Exception as db_error:
+                    tentativas += 1
+                    print(f"Tentativa {tentativas}/{max_tentativas} - Erro DB: {db_error}")
+                    
+                    if tentativas >= max_tentativas:
+                        print("Todas as tentativas falharam - perdendo leitura")
+                        #LOG DA LEITURA PERDIDA (para debug)
+                        print(f"Leitura perdida: {payload}")
+                    else:
+                        #ESTRATÉGIA DE RECUPERAÇÃO
+                        try:
+                            # Limpa a sessão corrompida
+                            db.session.rollback()
+                            db.session.close()
+                            
+                            # Espera progressivamente mais
+                            wait_time = 2 ** tentativas  # 2, 4, 8 segundos
+                            print(f"Aguardando {wait_time}s antes da próxima tentativa...")
+                            time.sleep(wait_time)
+                            
+                            # Recria a sessão
+                            db.session = db.create_scoped_session()
+                            
+                        except Exception as recovery_error:
+                            print(f"Erro na recuperação: {recovery_error}")
+            
     except Exception as e:
-        print(f"HiveMQ - Erro: {str(e)}")
+        print(f"HiveMQ - Erro geral: {str(e)}")
 
 def mqtt_worker():
     print("MQTT - Worker iniciado!")  
@@ -450,6 +496,6 @@ print("Render + HiveMQ + Supabase")
 print("=" * 60)
 
 if __name__ == '__main__':
-    print("🔧 Modo desenvolvimento local")
+    print("Modo desenvolvimento local")
     port = int(os.environ.get('PORT', 5000))
     app.run(host='0.0.0.0', port=port, threaded=True, debug=True)
